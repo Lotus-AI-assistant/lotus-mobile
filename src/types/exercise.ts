@@ -18,6 +18,7 @@ export interface ExerciseSegmentResponse {
   url_id?: number | null;
   video_url: string;
   video_path?: string | null;
+  thumbnail_url?: string | null;
   original_youtube_url?: string | null;
   title?: string | null;
   frame_start: number;

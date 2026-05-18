@@ -11,6 +11,13 @@ export interface WeeklyPlanResponse {
   updated_at: string;
 }
 
+export interface GenerateWeeklyPlanResponse {
+  weekly_plan: WeeklyPlanResponse;
+  created_day_count: number;
+  created_exercise_count: number;
+  summary: string;
+}
+
 export interface DailyPlanResponse {
   id: number;
   weekly_plan_id: number;
@@ -33,5 +40,8 @@ export interface PlanExerciseResponse {
   rest_seconds?: number | null;
   intensity_level?: string | null;
   notes?: string | null;
+  exercise_name?: string | null;
+  exercise_level1_pose?: string | null;
+  exercise_level2_pose?: string | null;
   created_at: string;
 }

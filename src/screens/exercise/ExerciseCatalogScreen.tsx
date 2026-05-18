@@ -1,26 +1,30 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 import AppTopBar from '../../components/AppTopBar';
 import AppToast from '../../components/AppToast';
 import { getExerciseSegments } from '../../services/exercise';
-import { ExerciseResponse } from '../../types/exercise';
+import { ExerciseResponse, ExerciseSegmentResponse } from '../../types/exercise';
 import { fetchExerciseCatalogAction } from './ExerciseCatalogScreen.actions';
 import { styles } from './ExerciseCatalogScreen.styles';
+
+let exerciseCache: ExerciseResponse[] | null = null;
+let previewUrlCache: Record<number, string> = {};
+let segmentCacheByExerciseId: Record<number, ExerciseSegmentResponse[]> = {};
 
 const ExerciseCatalogScreen = ({ navigation }: any) => {
   const insets = useSafeAreaInsets();
   const isUnmountedRef = useRef(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!exerciseCache);
   const [previewLoadingIds, setPreviewLoadingIds] = useState<Record<number, boolean>>({});
-  const [previewByExerciseId, setPreviewByExerciseId] = useState<Record<number, string>>({});
+  const [previewByExerciseId, setPreviewByExerciseId] = useState<Record<number, string>>(previewUrlCache);
   const [previewTriedIds, setPreviewTriedIds] = useState<Record<number, boolean>>({});
   const [visibleExerciseIds, setVisibleExerciseIds] = useState<number[]>([]);
   const [keyword, setKeyword] = useState('');
   const [selectedL1, setSelectedL1] = useState('Tümü');
   const [selectedL2, setSelectedL2] = useState('Tümü');
-  const [items, setItems] = useState<ExerciseResponse[]>([]);
+  const [items, setItems] = useState<ExerciseResponse[]>(exerciseCache ?? []);
   const [toast, setToast] = useState({
     visible: false,
     title: '',
@@ -28,10 +32,11 @@ const ExerciseCatalogScreen = ({ navigation }: any) => {
     type: 'success' as 'success' | 'error',
   });
 
-  const loadExercises = useCallback(async () => {
+  const loadExercises = useCallback(async (silent: boolean = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await fetchExerciseCatalogAction();
+      exerciseCache = data;
       setItems(data);
     } catch (error: any) {
       setToast({
@@ -41,12 +46,16 @@ const ExerciseCatalogScreen = ({ navigation }: any) => {
         type: 'error',
       });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadExercises();
+    if (exerciseCache && exerciseCache.length > 0) {
+      loadExercises(true);
+      return;
+    }
+    loadExercises(false);
   }, [loadExercises]);
 
   const searchFiltered = useMemo(() => {
@@ -116,26 +125,41 @@ const ExerciseCatalogScreen = ({ navigation }: any) => {
     if (missing.length === 0) return;
 
     const loadPreviews = async () => {
-      for (const exercise of missing) {
-        if (isUnmountedRef.current) break;
-        setPreviewLoadingIds(prev => ({ ...prev, [exercise.id]: true }));
-        setPreviewTriedIds(prev => ({ ...prev, [exercise.id]: true }));
-        try {
-          const segments = await withTimeout(getExerciseSegments(exercise.id, undefined, 8), 4500, []);
-          const playable = segments.filter(segment => Boolean(segment.video_url && segment.video_url.toLowerCase().includes('.mp4')));
-          if (isUnmountedRef.current) break;
-          if (playable.length > 0) {
-            const random = playable[Math.floor(Math.random() * playable.length)];
-            setPreviewByExerciseId(prev => ({ ...prev, [exercise.id]: random.video_url }));
-          }
-        } catch {
-          // Bu kart için önizleme bulunamazsa sessizce fallback göster.
-        } finally {
-          if (!isUnmountedRef.current) {
-            setPreviewLoadingIds(prev => ({ ...prev, [exercise.id]: false }));
+      const queue = [...missing];
+      const maxConcurrent = Math.min(3, queue.length);
+
+      const worker = async () => {
+        while (queue.length > 0) {
+          if (isUnmountedRef.current) return;
+          const exercise = queue.shift();
+          if (!exercise) return;
+          setPreviewLoadingIds(prev => ({ ...prev, [exercise.id]: true }));
+          setPreviewTriedIds(prev => ({ ...prev, [exercise.id]: true }));
+          try {
+            const segments = await withTimeout(getExerciseSegments(exercise.id, undefined, 6), 3500, []);
+            segmentCacheByExerciseId[exercise.id] = segments;
+            for (const segment of segments) {
+              if (segment.thumbnail_url) {
+                Image.prefetch(segment.thumbnail_url);
+              }
+            }
+            const playable = segments.filter(segment => Boolean(segment.video_url && segment.video_url.trim().length > 0));
+            if (isUnmountedRef.current) return;
+            if (playable.length > 0) {
+              const random = playable[Math.floor(Math.random() * playable.length)];
+              previewUrlCache = { ...previewUrlCache, [exercise.id]: random.video_url };
+              setPreviewByExerciseId(prev => ({ ...prev, [exercise.id]: random.video_url }));
+            }
+          } catch {
+          } finally {
+            if (!isUnmountedRef.current) {
+              setPreviewLoadingIds(prev => ({ ...prev, [exercise.id]: false }));
+            }
           }
         }
-      }
+      };
+
+      await Promise.all(Array.from({ length: maxConcurrent }, worker));
     };
 
     loadPreviews();
@@ -244,23 +268,43 @@ const ExerciseCatalogScreen = ({ navigation }: any) => {
         renderItem={({ item }) => {
           const previewUri = previewByExerciseId[item.id];
           const isPreviewLoading = previewLoadingIds[item.id];
+          const segments = segmentCacheByExerciseId[item.id];
+          const thumbnailUrl = segments?.find(segment => Boolean(segment.thumbnail_url))?.thumbnail_url ?? null;
+
           return (
             <TouchableOpacity
               style={styles.card}
               activeOpacity={0.9}
-              onPress={() => navigation.navigate('ExerciseSegments', { exercise: item })}
+              onPress={() => navigation.navigate('ExerciseSegments', {
+                exercise: item,
+                initialPreviewUrl: previewUri,
+                initialSegments: segmentCacheByExerciseId[item.id],
+              })}
             >
               <View style={styles.previewWrap}>
-                {previewUri ? (
-                  <Video
-                    source={{ uri: previewUri }}
-                    style={styles.previewVideo}
-                    controls={false}
-                    paused={false}
-                    muted
-                    repeat
-                    resizeMode="cover"
-                  />
+                {thumbnailUrl ? (
+                  <Image source={{ uri: thumbnailUrl }} style={styles.previewVideo} resizeMode="cover" />
+                ) : previewUri ? (
+                  <View style={{ flex: 1, backgroundColor: 'transparent', width: '100%', height: '100%' }}>
+                    <Video
+                      source={{ uri: previewUri }}
+                      style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0 }}
+                      controls={false}
+                        paused={false}
+                        muted={true}
+                        repeat={true}
+                        resizeMode="cover"
+                        playInBackground={false}
+                        playWhenInactive={false}
+                        ignoreSilentSwitch="obey"
+                        renderLoader={() => (
+                          <View style={styles.previewFallback}>
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          </View>
+                        )}
+                        onError={(e) => console.log('Video error catalog:', e)}
+                      />
+                  </View>
                 ) : (
                   <View style={styles.previewFallback}>
                     {isPreviewLoading ? (

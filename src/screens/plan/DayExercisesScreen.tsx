@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppToast from '../../components/AppToast';
+import AppTopBar from '../../components/AppTopBar';
 import { DailyPlanResponse, PlanExerciseResponse } from '../../types/plan';
-import { fetchDayExercisesAction } from './DayExercisesScreen.actions';
+import { fetchDayExercisesAction, fetchExerciseForPlanAction } from './DayExercisesScreen.actions';
 import { styles } from './DayExercisesScreen.styles';
 
-const DayExercisesScreen = ({ route }: any) => {
+const DayExercisesScreen = ({ route, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const dailyPlan = route?.params?.dailyPlan as DailyPlanResponse;
   const [loading, setLoading] = useState(true);
@@ -39,6 +40,42 @@ const DayExercisesScreen = ({ route }: any) => {
     loadExercises();
   }, [loadExercises]);
 
+  const handleOpenExercise = async (item: PlanExerciseResponse) => {
+    if (!item.exercise_id) {
+      return;
+    }
+
+    try {
+      const exercise = await fetchExerciseForPlanAction(item.exercise_id);
+      navigation.navigate('ExerciseSegments', { exercise });
+    } catch (error: any) {
+      setToast({
+        visible: true,
+        title: 'Hata',
+        message: error?.message || 'Egzersiz detayi acilamadi.',
+        type: 'error',
+      });
+    }
+  };
+
+  const formatDuration = (seconds?: number | null) => {
+    if (!seconds || seconds <= 0) return '-';
+    if (seconds < 60) return `${seconds} sn`;
+    const minutes = Math.floor(seconds / 60);
+    const remain = seconds % 60;
+    return remain > 0 ? `${minutes} dk ${remain} sn` : `${minutes} dk`;
+  };
+
+  const formatPose = (value?: string | null) => {
+    if (!value) return null;
+    return value
+      .replace(/[-_]/g, ' ')
+      .split(' ')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
@@ -56,38 +93,68 @@ const DayExercisesScreen = ({ route }: any) => {
         type={toast.type}
         onHide={() => setToast(prev => ({ ...prev, visible: false }))}
       />
-      <Text style={styles.title}>Gün {dailyPlan.day_index} Egzersizleri</Text>
-      <Text style={styles.subtitle}>Sıra, set/tekrar ve dinlenme bilgilerini burada görebilirsin.</Text>
+      <AppTopBar title={`Gün ${dailyPlan.day_index}`} onBack={() => navigation.goBack()} containerStyle={styles.topBar} />
+      <Text style={styles.title}>{dailyPlan.day_name || 'Günlük Plan'}</Text>
+      <Text style={styles.subtitle}>
+        {dailyPlan.focus_area || 'Bugünün planı'} • {dailyPlan.estimated_minutes ? `${dailyPlan.estimated_minutes} dk` : 'Süre belirlenmedi'}
+      </Text>
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {items.length === 0 ? (
           <Text style={styles.emptyText}>Bu gün için planlanmış egzersiz bulunamadı.</Text>
         ) : (
-          items.map((item) => (
-            <View key={item.id} style={styles.card}>
-              <View style={styles.row}>
-                <Text style={styles.label}>Sıra</Text>
-                <Text style={styles.value}>{item.order_index}</Text>
+          items.map((item) => {
+            const isNavigable = Boolean(item.exercise_id);
+            return (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.card, isNavigable && styles.cardPressable]}
+              activeOpacity={isNavigable ? 0.85 : 1}
+              disabled={!isNavigable}
+              onPress={() => handleOpenExercise(item)}
+            >
+              <View style={styles.headerRow}>
+                <View style={styles.orderBadge}>
+                  <Text style={styles.orderBadgeText}>{item.order_index}</Text>
+                </View>
+                <View style={styles.headerTextWrap}>
+                  <Text style={styles.exerciseName}>{item.exercise_name || 'Toparlanma Bloğu'}</Text>
+                  <Text style={styles.exerciseMeta}>
+                    {item.exercise_level1_pose || item.exercise_level2_pose
+                      ? [formatPose(item.exercise_level1_pose), formatPose(item.exercise_level2_pose)].filter(Boolean).join(' • ')
+                      : 'Plan notu'}
+                  </Text>
+                </View>
+                <View style={styles.intensityPill}>
+                  <Text style={styles.intensityPillText}>{item.intensity_level || '-'}</Text>
+                </View>
               </View>
-              <View style={styles.row}>
-                <Text style={styles.label}>Exercise ID</Text>
-                <Text style={styles.value}>{item.exercise_id ?? '-'}</Text>
+
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <Text style={styles.label}>Set / Tekrar</Text>
+                  <Text style={styles.value}>{item.sets ?? '-'} / {item.reps ?? '-'}</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.label}>Süre</Text>
+                  <Text style={styles.value}>{formatDuration(item.duration_seconds)}</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.label}>Dinlenme</Text>
+                  <Text style={styles.value}>{formatDuration(item.rest_seconds)}</Text>
+                </View>
               </View>
-              <View style={styles.row}>
-                <Text style={styles.label}>Set / Tekrar</Text>
-                <Text style={styles.value}>{item.sets ?? '-'} / {item.reps ?? '-'}</Text>
-              </View>
-              <View style={styles.row}>
-                <Text style={styles.label}>Süre / Dinlenme</Text>
-                <Text style={styles.value}>{item.duration_seconds ?? '-'} sn / {item.rest_seconds ?? '-'} sn</Text>
-              </View>
-              <View style={styles.row}>
-                <Text style={styles.label}>Yoğunluk</Text>
-                <Text style={styles.value}>{item.intensity_level ?? '-'}</Text>
-              </View>
-              {item.notes ? <Text style={styles.notes}>Not: {item.notes}</Text> : null}
-            </View>
-          ))
+
+              {item.exercise_id ? (
+                <View style={styles.row}>
+                  <Text style={styles.label}>Video Detayi</Text>
+                  <Text style={styles.linkText}>Videoyu Goster</Text>
+                </View>
+              ) : null}
+
+              {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
+            </TouchableOpacity>
+          )})
         )}
       </ScrollView>
     </View>

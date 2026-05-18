@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   token?: string;
@@ -21,8 +19,7 @@ export class ApiError extends Error {
   }
 }
 
-const API_BASE_URL =
-  Platform.OS === 'android' ? 'http://10.8.34.121:8000' : 'http://127.0.0.1:8000';
+const API_BASE_URL = 'https://lotus-backend-production-789d.up.railway.app';
 
 let unauthorizedHandler: UnauthorizedHandler | null = null;
 let isUnauthorizedHandling = false;
@@ -56,7 +53,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   } catch {
     throw new Error(
       `Ağ bağlantı hatası. Backend erişilemiyor: ${API_BASE_URL}. ` +
-        'Backendin çalıştığını ve telefon/emülatörün aynı ağda olduğunu kontrol et.'
+        'Backend servisinin çalıştığını ve internet bağlantını kontrol et.'
     );
   }
 

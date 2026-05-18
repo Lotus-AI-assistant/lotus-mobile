@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Image, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Video from 'react-native-video';
 import AppTopBar from '../../components/AppTopBar';
@@ -11,6 +11,7 @@ import { styles } from './ExerciseSegmentsScreen.styles';
 const ExerciseSegmentsScreen = ({ route, navigation }: any) => {
   const insets = useSafeAreaInsets();
   const exercise = route?.params?.exercise as ExerciseResponse;
+  const initialSegments = route?.params?.initialSegments as ExerciseSegmentResponse[] | undefined;
   const [loading, setLoading] = useState(true);
   const [segments, setSegments] = useState<ExerciseSegmentResponse[]>([]);
   const [toast, setToast] = useState({
@@ -20,10 +21,12 @@ const ExerciseSegmentsScreen = ({ route, navigation }: any) => {
     type: 'success' as 'success' | 'error',
   });
   const [activePreviewSegmentId, setActivePreviewSegmentId] = useState<number | null>(null);
+  const [visibleSegmentIds, setVisibleSegmentIds] = useState<number[]>([]);
+  const [videoReadyBySegmentId, setVideoReadyBySegmentId] = useState<Record<number, boolean>>({});
 
-  const loadSegments = useCallback(async () => {
+  const loadSegments = useCallback(async (silent: boolean = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await fetchExerciseSegmentsAction(exercise.id);
       setSegments(data);
       if (data.length > 0) {
@@ -42,13 +45,20 @@ const ExerciseSegmentsScreen = ({ route, navigation }: any) => {
         type: 'error',
       });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [exercise.id]);
 
   useEffect(() => {
-    loadSegments();
-  }, [loadSegments]);
+    if (initialSegments && initialSegments.length > 0) {
+      setSegments(initialSegments);
+      setActivePreviewSegmentId(initialSegments[0].id);
+      setLoading(false);
+      loadSegments(true);
+      return;
+    }
+    loadSegments(false);
+  }, [initialSegments, loadSegments]);
 
   const formatDifficulty = (difficulty?: ExerciseSegmentResponse['difficulty_level']) => {
     if (difficulty === 'beginner') return 'Başlangıç';
@@ -127,75 +137,125 @@ const ExerciseSegmentsScreen = ({ route, navigation }: any) => {
         titleStyle={styles.pageTitle}
       />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {segments.length === 0 ? (
-          <Text style={styles.emptyText}>Bu egzersiz için segment bulunamadı.</Text>
-        ) : (
-          segments.map((segment, index) => {
-            const title = resolveSegmentTitle(segment, index);
-            const duration = formatDuration(segment.duration);
-            const hasPlayableVideo = Boolean(segment.video_url && segment.video_url.toLowerCase().includes('.mp4'));
-            const l1Pose = formatPose(segment.l1_pose);
-            const l2Pose = formatPose(segment.l2_pose);
-            const l3Pose = formatPose(segment.l3_pose);
-            const isPreviewActive = activePreviewSegmentId === segment.id;
+      {(() => {
+        const viewabilityConfig = { itemVisiblePercentThreshold: 40 };
+        const onViewableItemsChanged = ({ viewableItems }: any) => {
+          const ids = viewableItems
+            .map((entry: any) => entry?.item?.id)
+            .filter((id: unknown): id is number => typeof id === 'number');
+          setVisibleSegmentIds(ids);
+        };
 
-            return (
-              <View key={segment.id} style={styles.card}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.videoTitle}>{title}</Text>
-                  <View style={styles.levelBadge}>
-                    <Text style={styles.levelBadgeText}>{formatDifficulty(segment.difficulty_level)}</Text>
-                  </View>
-                </View>
+        const visibleIdSet = new Set(visibleSegmentIds);
+        const loader = () => (
+          <View style={styles.previewFallback}>
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          </View>
+        );
 
-                {duration ? (
-                  <View style={styles.metaRow}>
-                    <Text style={styles.metaText}>Süre</Text>
-                    <Text style={styles.metaDot}>•</Text>
-                    <Text style={styles.metaText}>{duration}</Text>
-                  </View>
-                ) : null}
+        return (
+      <FlatList
+        data={segments}
+        keyExtractor={(item) => String(item.id)}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 12 }}
+        initialNumToRender={3}
+        windowSize={5}
+        removeClippedSubviews={true}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
+        ListEmptyComponent={<Text style={styles.emptyText}>Bu egzersiz için segment bulunamadı.</Text>}
+        renderItem={({ item: segment, index }) => {
+          const title = resolveSegmentTitle(segment, index);
+          const duration = formatDuration(segment.duration);
+          const hasPlayableVideo = Boolean(segment.video_url && segment.video_url.trim().length > 0);
+          const l1Pose = formatPose(segment.l1_pose);
+          const l2Pose = formatPose(segment.l2_pose);
+          const l3Pose = formatPose(segment.l3_pose);
+          const isPreviewActive = activePreviewSegmentId === segment.id;
+          const shouldRenderPreview = isPreviewActive || visibleIdSet.has(segment.id);
+          const thumbnailUrl = segment.thumbnail_url || null;
 
-                <View style={styles.poseRow}>
-                  {l1Pose ? <Text style={styles.poseChip}>{l1Pose}</Text> : null}
-                  {l2Pose ? <Text style={styles.poseChip}>{l2Pose}</Text> : null}
-                  {l3Pose ? <Text style={styles.poseChip}>{l3Pose}</Text> : null}
-                </View>
-
-                <View style={styles.thumbnail}>
-                  {hasPlayableVideo ? (
-                    <>
-                      <Video
-                        source={{ uri: segment.video_url }}
-                        style={styles.videoPreview}
-                        controls={false}
-                        paused={!isPreviewActive}
-                        repeat
-                        muted={false}
-                        volume={1.0}
-                        rate={1.0}
-                        resizeMode="cover"
-                      />
-                      <TouchableOpacity
-                        style={styles.previewToggleButton}
-                        activeOpacity={0.9}
-                        onPress={() => setActivePreviewSegmentId(isPreviewActive ? null : segment.id)}
-                      >
-                        <Text style={styles.previewToggleButtonText}>{isPreviewActive ? 'Duraklat' : 'Oynat'}</Text>
-                      </TouchableOpacity>
-                    </>
-                  ) : (
-                    <View style={styles.previewFallback}>
-                      <Text style={styles.previewFallbackText}>Bu segment için local preview bulunamadı.</Text>
-                    </View>
-                  )}
+          return (
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.videoTitle}>{title}</Text>
+                <View style={styles.levelBadge}>
+                  <Text style={styles.levelBadgeText}>{formatDifficulty(segment.difficulty_level)}</Text>
                 </View>
               </View>
-            );
-          })
-        )}
-      </ScrollView>
+
+              {duration ? (
+                <View style={styles.metaRow}>
+                  <Text style={styles.metaText}>Süre</Text>
+                  <Text style={styles.metaDot}>•</Text>
+                  <Text style={styles.metaText}>{duration}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.poseRow}>
+                {l1Pose ? <Text style={styles.poseChip}>{l1Pose}</Text> : null}
+                {l2Pose ? <Text style={styles.poseChip}>{l2Pose}</Text> : null}
+                {l3Pose ? <Text style={styles.poseChip}>{l3Pose}</Text> : null}
+              </View>
+
+              <View style={styles.thumbnail}>
+                {hasPlayableVideo ? (
+                  <>
+                    {thumbnailUrl && !isPreviewActive ? (
+                      <Image source={{ uri: thumbnailUrl }} style={styles.videoPreview} resizeMode="cover" />
+                    ) : shouldRenderPreview ? (
+                      <>
+                        {thumbnailUrl ? (
+                          <Image source={{ uri: thumbnailUrl }} style={styles.videoPreview} resizeMode="cover" />
+                        ) : null}
+                        <Video
+                          source={{ uri: segment.video_url }}
+                          style={[
+                            styles.videoPreview,
+                            thumbnailUrl && !videoReadyBySegmentId[segment.id] ? { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: 0 } : null,
+                          ]}
+                          controls={false}
+                          paused={!isPreviewActive}
+                          repeat={true}
+                          muted={!isPreviewActive}
+                          volume={1.0}
+                          rate={1.0}
+                          resizeMode="cover"
+                          ignoreSilentSwitch="obey"
+                          renderLoader={loader}
+                          onLoadStart={() => setVideoReadyBySegmentId(prev => ({ ...prev, [segment.id]: false }))}
+                          onReadyForDisplay={() => setVideoReadyBySegmentId(prev => ({ ...prev, [segment.id]: true }))}
+                          onError={(e) => console.log('Segment Video error:', e)}
+                        />
+                      </>
+                    ) : (
+                      thumbnailUrl ? (
+                        <Image source={{ uri: thumbnailUrl }} style={styles.videoPreview} resizeMode="cover" />
+                      ) : (
+                        <View style={styles.videoPreview} />
+                      )
+                    )}
+                    <TouchableOpacity
+                      style={styles.previewToggleButton}
+                      activeOpacity={0.9}
+                      onPress={() => setActivePreviewSegmentId(isPreviewActive ? null : segment.id)}
+                    >
+                      <Text style={styles.previewToggleButtonText}>{isPreviewActive ? 'Duraklat' : 'Oynat'}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <View style={styles.previewFallback}>
+                    <Text style={styles.previewFallbackText}>Bu segment için local preview bulunamadı.</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          );
+        }}
+      />
+        );
+      })()}
     </View>
   );
 };

@@ -80,7 +80,7 @@ export const styles = StyleSheet.create({
   previewVideo: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#000000',
+    backgroundColor: '#1D1B49',
   },
   previewFallback: {
     width: '100%',

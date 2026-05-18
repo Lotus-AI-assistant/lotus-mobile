@@ -5,7 +5,7 @@ import AppToast from '../../components/AppToast';
 import AppTopBar from '../../components/AppTopBar';
 import { WeeklyPlanResponse } from '../../types/plan';
 import { formatFitnessGoal } from '../../utils/goalFormatters';
-import { createStarterWeeklyPlanAction, fetchWeeklyPlansAction } from './WeeklyPlansScreen.actions';
+import { fetchWeeklyPlansAction, generatePersonalizedWeeklyPlanAction } from './WeeklyPlansScreen.actions';
 import { styles } from './WeeklyPlansScreen.styles';
 
 const formatDateRange = (start?: string | null, end?: string | null) => {
@@ -46,14 +46,14 @@ const WeeklyPlansScreen = ({ navigation }: any) => {
     loadPlans();
   }, [loadPlans]);
 
-  const handleCreateStarter = async () => {
+  const handleGeneratePlan = async () => {
     try {
       setCreating(true);
-      await createStarterWeeklyPlanAction();
+      const result = await generatePersonalizedWeeklyPlanAction();
       setToast({
         visible: true,
         title: 'Başarılı',
-        message: 'Örnek haftalık plan oluşturuldu.',
+        message: result.summary || 'Kişisel haftalık plan oluşturuldu.',
         type: 'success',
       });
       await loadPlans();
@@ -87,15 +87,23 @@ const WeeklyPlansScreen = ({ navigation }: any) => {
         onHide={() => setToast(prev => ({ ...prev, visible: false }))}
       />
       <AppTopBar title="Haftalık Planlarım" onBack={() => navigation.goBack()} containerStyle={styles.topBar} />
-      <Text style={styles.subtitle}>Planını seç, günlerine ve egzersizlerine adım adım geç.</Text>
+      <Text style={styles.subtitle}>Profiline göre oluşturulan planlarını seç, günlerine ve egzersizlerine adım adım geç.</Text>
 
       <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>Kişisel Plan Asistanı</Text>
+          <Text style={styles.heroTitle}>Profiline uygun yeni bir haftalık plan üret</Text>
+          <Text style={styles.heroText}>
+            Hedefin, haftalık uygunluğun ve deneyim seviyen kullanılarak 7 günlük daha dengeli bir akış hazırlanır.
+          </Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleGeneratePlan} disabled={creating} activeOpacity={0.85}>
+            <Text style={styles.primaryButtonText}>{creating ? 'Kişisel plan hazırlanıyor...' : 'Akıllı Plan Oluştur'}</Text>
+          </TouchableOpacity>
+        </View>
+
         {plans.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>Henüz haftalık planın yok. Hızlıca başlangıç planı oluşturabilirsin.</Text>
-            <TouchableOpacity style={styles.primaryButton} onPress={handleCreateStarter} disabled={creating} activeOpacity={0.8}>
-              <Text style={styles.primaryButtonText}>{creating ? 'Oluşturuluyor...' : 'Başlangıç Planı Oluştur'}</Text>
-            </TouchableOpacity>
+            <Text style={styles.emptyText}>Henüz haftalık planın yok. Yukarıdaki buton ile profiline uygun ilk planını oluşturabilirsin.</Text>
           </View>
         ) : (
           plans.map((plan) => (
@@ -108,9 +116,10 @@ const WeeklyPlansScreen = ({ navigation }: any) => {
               <Text style={styles.cardTitle}>{plan.title}</Text>
               <Text style={styles.cardMeta}>Tarih: {formatDateRange(plan.start_date, plan.end_date)}</Text>
               <Text style={styles.cardMeta}>Hedef: {formatFitnessGoal(plan.goal)}</Text>
+              {plan.notes ? <Text style={styles.planNote}>{plan.notes}</Text> : null}
               <View style={styles.row}>
                 <View style={styles.pill}>
-                  <Text style={styles.pillText}>{plan.status}</Text>
+                  <Text style={styles.pillText}>{plan.status === 'generated' ? 'Akıllı Plan' : plan.status}</Text>
                 </View>
                 <Text style={styles.openText}>Günleri Aç</Text>
               </View>

@@ -1,6 +1,6 @@
 import { getSessionToken } from './auth';
 import { apiClient } from './api';
-import { DailyPlanResponse, PlanExerciseResponse, WeeklyPlanResponse } from '../types/plan';
+import { DailyPlanResponse, GenerateWeeklyPlanResponse, PlanExerciseResponse, WeeklyPlanResponse } from '../types/plan';
 
 type CreateWeeklyPlanPayload = {
   title: string;
@@ -27,6 +27,17 @@ export async function getWeeklyPlans(token?: string) {
 
 export async function createWeeklyPlan(payload: CreateWeeklyPlanPayload, token?: string) {
   return apiClient.request<WeeklyPlanResponse>('/plans/weekly', {
+    method: 'POST',
+    token: resolveToken(token),
+    body: payload,
+  });
+}
+
+export async function generateWeeklyPlan(
+  payload: { start_date?: string; replace_existing_draft?: boolean } = {},
+  token?: string
+) {
+  return apiClient.request<GenerateWeeklyPlanResponse>('/plans/weekly/generate', {
     method: 'POST',
     token: resolveToken(token),
     body: payload,
